@@ -13,6 +13,10 @@
  * - compose_animation: Compose custom animation with duration/easing/delay
  * - get_animation_css: Get just the CSS for direct use
  * - suggest_animation: AI-friendly suggestion based on use case description
+ * - list_icon_providers: List available icon providers
+ * - search_icons: Search icons across providers
+ * - get_icon: Get SVG code for a specific icon
+ * - add_custom_icon: Register a custom SVG icon for the session
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -48,6 +52,114 @@ try {
     animationData = { categories: [], animations: [] };
   }
 }
+
+// Load icon data from icons.js
+let iconData = { categories: [], icons: [] };
+try {
+  const iconsPath = join(__dirname, '..', 'js', 'icons.js');
+  const content = readFileSync(iconsPath, 'utf-8');
+  const match = content.match(/window\.ANIMOTION_ICONS\s*=\s*(\{[\s\S]*\});?\s*$/);
+  if (match) {
+    iconData = JSON.parse(match[1]);
+  }
+} catch {
+  // icons.js may not be pure JSON-parseable due to trailing commas etc.
+  // Try a more lenient approach
+  try {
+    const iconsPath = join(__dirname, '..', 'js', 'icons.js');
+    const content = readFileSync(iconsPath, 'utf-8');
+    // Extract the object between the first { and last }
+    const start = content.indexOf('{');
+    const end = content.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      let jsonStr = content.substring(start, end + 1);
+      // Remove trailing commas before } or ]
+      jsonStr = jsonStr.replace(/,\s*([\]}])/g, '$1');
+      iconData = JSON.parse(jsonStr);
+    }
+  } catch {
+    iconData = { categories: [], icons: [] };
+  }
+}
+
+// In-memory custom icons for the session
+const customIcons = [];
+
+// Icon provider metadata (for list_icon_providers)
+const iconProviders = [
+  {
+    id: 'builtin',
+    name: 'Animotion Built-in',
+    type: 'builtin',
+    description: '120 hand-crafted SVG icons included with Animotion. Works out of the box.',
+    license: 'MIT',
+    totalIcons: (iconData.icons || []).length,
+    setup: 'No setup needed. Icons are available immediately.',
+  },
+  {
+    id: 'lucide',
+    name: 'Lucide Icons',
+    type: 'free',
+    description: 'Beautiful & consistent open-source icons. 1500+ icons.',
+    license: 'ISC',
+    totalIcons: 1500,
+    setup: 'Free, no API key needed. On the website, select "Lucide Icons" from the provider dropdown and click "Load Icons". In MCP, use search_icons with provider="lucide" — note: external providers are only available via the website UI. The MCP server provides built-in icons directly.',
+  },
+  {
+    id: 'heroicons',
+    name: 'Heroicons',
+    type: 'free',
+    description: 'Hand-crafted SVG icons by the Tailwind CSS team. 300+ icons.',
+    license: 'MIT',
+    totalIcons: 300,
+    setup: 'Free, no API key needed. On the website, select "Heroicons" and click "Load Icons".',
+  },
+  {
+    id: 'tabler',
+    name: 'Tabler Icons',
+    type: 'free',
+    description: '5000+ free MIT-licensed SVG icons.',
+    license: 'MIT',
+    totalIcons: 5000,
+    setup: 'Free, no API key needed. On the website, select "Tabler Icons" and click "Load Icons".',
+  },
+  {
+    id: 'bootstrap',
+    name: 'Bootstrap Icons',
+    type: 'free',
+    description: 'Official open-source icon library for Bootstrap. 2000+ icons.',
+    license: 'MIT',
+    totalIcons: 2000,
+    setup: 'Free, no API key needed. On the website, select "Bootstrap Icons" and click "Load Icons".',
+  },
+  {
+    id: 'fontawesome-pro',
+    name: 'Font Awesome Pro',
+    type: 'paid',
+    description: 'Premium icon library with 26,000+ icons. Requires a Font Awesome Pro Kit ID.',
+    license: 'Commercial',
+    totalIcons: 26000,
+    setup: 'Requires a Font Awesome Pro subscription. On the website, select "Font Awesome Pro", enter your Kit ID, and click "Load Icons". Get your Kit ID at fontawesome.com/kits.',
+  },
+  {
+    id: 'streamline',
+    name: 'Streamline Icons',
+    type: 'paid',
+    description: 'Premium library with 180,000+ icons. Requires an API key.',
+    license: 'Commercial',
+    totalIcons: 180000,
+    setup: 'Requires a Streamline subscription. On the website, select "Streamline Icons", enter your API key, and click "Load Icons". Get your key at streamlinehq.com/developers.',
+  },
+  {
+    id: 'custom',
+    name: 'Custom Icons',
+    type: 'custom',
+    description: 'Upload your own SVG icons. Via the website, drag & drop SVGs. Via MCP, use the add_custom_icon tool.',
+    license: 'Your own',
+    totalIcons: 0,
+    setup: 'On the website, select "Custom Icons" and drag & drop SVG files. Via MCP, use the add_custom_icon tool to register SVGs.',
+  },
+];
 
 const server = new Server(
   {
@@ -182,6 +294,84 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ['id'],
+      },
+    },
+
+    // ── Icon Tools ──
+
+    {
+      name: 'list_icon_providers',
+      description: 'List all available icon providers with their type (builtin, free, paid, custom), setup instructions, and icon counts. Built-in icons work immediately; external providers need setup via the website.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'search_icons',
+      description: 'Search icons by name, ID, or tags. Works out of the box with built-in icons (120 icons). For external providers (Lucide, Heroicons, etc.), returns setup instructions since those must be loaded via the website.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Search query — matches icon name, ID, and tags. Examples: "home", "arrow", "user", "heart"',
+          },
+          provider: {
+            type: 'string',
+            description: 'Provider ID to search within. Default: "builtin". Options: builtin, lucide, heroicons, tabler, bootstrap, fontawesome-pro, streamline, custom',
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum results to return (default: 20, max: 100)',
+          },
+        },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'get_icon',
+      description: 'Get the SVG code for a specific icon by its ID. Works directly with built-in and custom icons. For external providers, returns setup instructions.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            description: 'Icon ID (e.g., "home", "search", "arrow-right")',
+          },
+          provider: {
+            type: 'string',
+            description: 'Provider ID. Default: "builtin". Also searches custom icons.',
+          },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'add_custom_icon',
+      description: 'Register a custom SVG icon for this MCP session. The icon can then be retrieved with get_icon or found via search_icons.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            description: 'Unique icon ID (e.g., "my-logo", "custom-arrow")',
+          },
+          name: {
+            type: 'string',
+            description: 'Human-readable name (e.g., "My Logo", "Custom Arrow")',
+          },
+          svg: {
+            type: 'string',
+            description: 'Full SVG markup string',
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional tags for search (e.g., ["logo", "brand"])',
+          },
+        },
+        required: ['id', 'name', 'svg'],
       },
     },
   ],
@@ -336,6 +526,212 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
+    // ── Icon Tools ──
+
+    case 'list_icon_providers': {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            providers: iconProviders.map(p => ({
+              ...p,
+              totalIcons: p.id === 'custom' ? customIcons.length : p.totalIcons,
+            })),
+            note: 'Built-in icons work immediately via search_icons and get_icon. External providers (free and paid) must be loaded via the Animotion website UI. Custom icons can be added via the add_custom_icon tool.',
+          }, null, 2),
+        }],
+      };
+    }
+
+    case 'search_icons': {
+      const { query, provider = 'builtin', limit = 20 } = args;
+      const q = (query || '').toLowerCase().trim();
+
+      if (!q) {
+        return {
+          content: [{ type: 'text', text: 'Please provide a search query.' }],
+          isError: true,
+        };
+      }
+
+      // Built-in icons: search directly
+      if (provider === 'builtin') {
+        let results = (iconData.icons || []).filter(icon =>
+          icon.id.toLowerCase().includes(q) ||
+          icon.name.toLowerCase().includes(q) ||
+          (icon.tags && icon.tags.some(t => t.toLowerCase().includes(q)))
+        );
+        results = results.slice(0, Math.min(limit, 100));
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              provider: 'builtin',
+              query,
+              count: results.length,
+              icons: results.map(i => ({
+                id: i.id,
+                name: i.name,
+                category: i.category,
+                tags: i.tags,
+                svg: i.svg,
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // Custom icons: search the session store
+      if (provider === 'custom') {
+        let results = customIcons.filter(icon =>
+          icon.id.toLowerCase().includes(q) ||
+          icon.name.toLowerCase().includes(q) ||
+          (icon.tags && icon.tags.some(t => t.toLowerCase().includes(q)))
+        );
+        results = results.slice(0, Math.min(limit, 100));
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              provider: 'custom',
+              query,
+              count: results.length,
+              icons: results,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // External providers: return instructions
+      const provInfo = iconProviders.find(p => p.id === provider);
+      if (!provInfo) {
+        return {
+          content: [{ type: 'text', text: `Unknown provider: ${provider}. Use list_icon_providers to see available providers.` }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            provider: provider,
+            available: false,
+            message: `${provInfo.name} icons are not available directly via MCP. They must be loaded through the Animotion website.`,
+            setup: provInfo.setup,
+            alternative: 'You can search built-in icons (provider="builtin") which work immediately, or add custom icons via the add_custom_icon tool.',
+          }, null, 2),
+        }],
+      };
+    }
+
+    case 'get_icon': {
+      const { id, provider = 'builtin' } = args;
+
+      // Search built-in
+      if (provider === 'builtin' || !provider) {
+        const icon = (iconData.icons || []).find(i => i.id === id);
+        if (icon) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                id: icon.id,
+                name: icon.name,
+                category: icon.category,
+                tags: icon.tags,
+                svg: icon.svg,
+                provider: 'builtin',
+              }, null, 2),
+            }],
+          };
+        }
+
+        // Also check custom icons as fallback
+        const customIcon = customIcons.find(i => i.id === id);
+        if (customIcon) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ ...customIcon, provider: 'custom' }, null, 2),
+            }],
+          };
+        }
+
+        return {
+          content: [{ type: 'text', text: `Icon not found: "${id}". Use search_icons to find available icons.` }],
+          isError: true,
+        };
+      }
+
+      // Custom
+      if (provider === 'custom') {
+        const icon = customIcons.find(i => i.id === id);
+        if (icon) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ ...icon, provider: 'custom' }, null, 2),
+            }],
+          };
+        }
+        return {
+          content: [{ type: 'text', text: `Custom icon not found: "${id}". Use add_custom_icon to register icons.` }],
+          isError: true,
+        };
+      }
+
+      // External provider
+      const provInfo = iconProviders.find(p => p.id === provider);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            provider: provider,
+            available: false,
+            message: `${provInfo ? provInfo.name : provider} icons must be loaded via the Animotion website.`,
+            setup: provInfo ? provInfo.setup : 'Unknown provider.',
+          }, null, 2),
+        }],
+      };
+    }
+
+    case 'add_custom_icon': {
+      const { id, name, svg, tags = [] } = args;
+
+      if (!id || !name || !svg) {
+        return {
+          content: [{ type: 'text', text: 'id, name, and svg are required.' }],
+          isError: true,
+        };
+      }
+
+      // Remove existing icon with same id
+      const existingIdx = customIcons.findIndex(i => i.id === id);
+      if (existingIdx >= 0) customIcons.splice(existingIdx, 1);
+
+      const icon = { id, name, category: 'custom', tags, svg };
+      customIcons.push(icon);
+
+      // Update custom provider count
+      const customProv = iconProviders.find(p => p.id === 'custom');
+      if (customProv) customProv.totalIcons = customIcons.length;
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: `Custom icon "${name}" (${id}) registered successfully.`,
+            icon,
+            totalCustomIcons: customIcons.length,
+          }, null, 2),
+        }],
+      };
+    }
+
     default:
       return {
         content: [{ type: 'text', text: `Unknown tool: ${name}` }],
@@ -365,6 +761,18 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       name: 'Utility Classes',
       description: 'Available utility classes for duration, delay, easing, etc.',
       mimeType: 'text/plain',
+    },
+    {
+      uri: 'animotion://icons',
+      name: 'Built-in Icon Catalog',
+      description: 'Complete catalog of all built-in SVG icons with metadata and SVG code',
+      mimeType: 'application/json',
+    },
+    {
+      uri: 'animotion://icon-providers',
+      name: 'Icon Providers',
+      description: 'List of all available icon providers (builtin, free, paid, custom) with setup instructions',
+      mimeType: 'application/json',
     },
   ],
 }));
@@ -404,6 +812,40 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
         };
       }
     }
+
+    case 'animotion://icons':
+      return {
+        contents: [{
+          uri,
+          mimeType: 'application/json',
+          text: JSON.stringify({
+            totalIcons: (iconData.icons || []).length,
+            categories: iconData.categories || [],
+            icons: (iconData.icons || []).map(i => ({
+              id: i.id,
+              name: i.name,
+              category: i.category,
+              tags: i.tags,
+              svg: i.svg,
+            })),
+          }, null, 2),
+        }],
+      };
+
+    case 'animotion://icon-providers':
+      return {
+        contents: [{
+          uri,
+          mimeType: 'application/json',
+          text: JSON.stringify({
+            providers: iconProviders.map(p => ({
+              ...p,
+              totalIcons: p.id === 'custom' ? customIcons.length : p.totalIcons,
+            })),
+            note: 'Built-in icons are available immediately via the search_icons and get_icon tools. External providers require setup via the Animotion website. Custom icons can be added via the add_custom_icon tool.',
+          }, null, 2),
+        }],
+      };
 
     default:
       throw new Error(`Unknown resource: ${uri}`);
@@ -456,7 +898,7 @@ function suggestAnimations(useCase, count) {
     'power': 'gaming', 'level': 'gaming',
     'shop': 'ecommerce', 'cart': 'ecommerce', 'product': 'ecommerce',
     'buy': 'ecommerce',
-    'social': 'social', 'like': 'social', 'share': 'social',
+    'social': 'social', 'share': 'social',
     'follow': 'social', 'story': 'social',
     'dashboard': 'dashboard', 'data': 'dashboard', 'metric': 'dashboard',
     'kpi': 'dashboard',
