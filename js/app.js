@@ -13,7 +13,7 @@
     searchQuery: '',
     viewMode: 'grid', // grid, compact, list
     activeTab: 'animations', // animations, icons, png-animator
-    theme: localStorage.getItem('animotion-theme') || 'dark',
+    theme: localStorage.getItem('animotion-theme') || 'light',
     filtered: [],
   };
 
@@ -32,11 +32,18 @@
 
   // ── Theme ──
   function applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
     state.theme = theme;
     localStorage.setItem('animotion-theme', theme);
     const btn = $('#theme-toggle');
-    if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    if (btn) {
+      btn.textContent = theme === 'dark' ? '☀' : '☾';
+      btn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+    }
   }
 
   // ── Sidebar Categories ──
@@ -451,7 +458,9 @@
     const themeBtn = $('#theme-toggle');
     if (themeBtn) {
       themeBtn.addEventListener('click', () => {
+        document.body.classList.add('theme-transitioning');
         applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+        setTimeout(() => document.body.classList.remove('theme-transitioning'), 400);
       });
     }
 
