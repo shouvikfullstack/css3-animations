@@ -16,12 +16,12 @@
 
   function IP() { return window.ANIMOTION_ICON_PROVIDERS; }
 
-  function init() {
+  async function init() {
     // Load built-in provider immediately
     if (IP()) {
-      IP().loadProvider('builtin');
+      await IP().loadProvider('builtin');
       // Also restore custom icons from session
-      IP().loadProvider('custom');
+      await IP().loadProvider('custom');
     }
     renderIconsTab();
     bindIconEvents();
